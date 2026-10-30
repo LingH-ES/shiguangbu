@@ -2,6 +2,7 @@ import {
   PALETTE, dateKey, addDays, dayBounds, visibleCategories, daySegments, totalsForDay,
   completion, isOngoingDefault, touchCategory, startTimer, stopTimer, setDefault,
   saveSession, formatDuration, shortDuration, uid, makeBackup, validateBackup,
+  PLAN_STATUSES, REFLECTION_FIELDS, plansForReview, addPlan, updatePlan, deletePlan, saveReflection,
 } from './model.js';
 import { openStorage, updateState, readState, onExternalChange } from './storage.js';
 
@@ -51,6 +52,11 @@ function esc(value) {
 }
 function category(id) { return state.categories.find(c => c.id === id); }
 function totalFor(day, now = Date.now()) { return Object.values(totalsForDay(state, day, now)).reduce((n, ms) => n + ms, 0); }
+function dailyBackupSummary(data) {
+  const plans = Object.values(data.plans || {}).reduce((n, items) => n + items.length, 0);
+  const reflections = Object.values(data.reflections || {}).filter(entry => Object.values(entry).some(text => text.trim())).length;
+  return `${plans} 项计划 · ${reflections} 天反思`;
+}
 function clock(value) { return new Date(value).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }); }
 function dateTitle(day) { return new Date(`${day}T12:00:00`).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }); }
 function fullDate(day) { return new Date(`${day}T12:00:00`).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' }); }
@@ -135,10 +141,76 @@ function dayPage() {
     ${state.active && !isToday ? `<div class="quick-note"><p>${esc(category(state.active.categoryId).name)}正在计时，历史页面不影响计时。</p><button data-action="go-today">回到今天</button></div>` : ''}
     <div class="section-heading"><h2>我的时间</h2><button class="text-action goal-action" data-action="add-category">${icon('plus', 12)}添加类别</button></div>
     ${categoryCards(day)}
+    ${dailyModules(day)}
     <div class="section-heading"><h2>时间足迹</h2><button class="text-action goal-action" data-action="manual">${icon('plus', 12)}手动补记</button></div>
     ${timeline(day)}
     <div class="quick-note"><p>小小的坚持，也值得被看见。<br>用类别旁的「记录」，写下今天的收获。</p>${icon('sparkles', 23)}</div>
   </section>`;
+}
+
+function dailyModules(day) {
+  const plans = state.plans[day] || [];
+  const review = plansForReview(state, day);
+  const reflection = state.reflections[day] || {};
+  const written = Object.values(reflection).filter(text => text.trim()).length;
+  function card(kind, title, subtitle, summary, preview) {
+    return `<article class="daily-card"><button class="daily-card-open" data-action="daily-module" data-kind="${kind}" data-day="${day}" aria-label="打开${title}"><span class="daily-card-heading"><span>${icon(kind === 'reflection' ? 'note' : kind === 'review' ? 'check' : 'calendar', 20)}<strong>${title}</strong></span>${icon('right', 16)}</span><span class="daily-card-subtitle">${subtitle}</span><span class="daily-card-summary">${summary}</span>${preview ? `<span class="daily-card-preview">${esc(preview)}</span>` : ''}</button></article>`;
+  }
+  return `<div class="section-heading"><h2>计划与回想</h2><span class="field-note">点开记录 · 自动保存</span></div><div class="daily-modules">
+    ${card('plans', '明日计划', `为 ${fullDate(addDays(day, 1))} 留一点期待`, plans.length ? `${plans.length} 项计划` : '写下明天想做的事', plans.slice(0, 3).map(p => p.text || '（待填写）').join(' · '))}
+    ${card('review', '昨日计划完成情况', `${fullDate(addDays(day, -1))} 制定 · ${fullDate(day)} 执行`, review.length ? `${review.filter(p => p.status === 'done').length} / ${review.length} 项已完成 · ${review.filter(p => p.status === 'partial').length} 项部分完成` : '前一天还没有为这天制定计划', review.slice(0, 3).map(p => `${PLAN_STATUSES[p.status]}：${p.text || '（待填写）'}`).join(' · '))}
+    ${card('reflection', '今日反思', `${fullDate(day)} · 留给自己的三句话`, written ? `已记录 ${written} / 3 个方面` : '做得好的、需要改进的、下一步', Object.values(reflection).find(text => text.trim()))}
+  </div>`;
+}
+
+function dailySaveFooter() {
+  return '<div class="daily-save"><span class="autosave-status" id="save-status" role="status">已保存在本机</span><button class="text-action" id="retry-daily" data-action="retry-daily" hidden>重试保存</button></div>';
+}
+
+function showDailyModule(kind, day) {
+  const planningDay = kind === 'review' ? addDays(day, -1) : day;
+  const items = state.plans[planningDay] || [];
+  let body;
+  if (kind === 'reflection') {
+    body = `<div class="form-grid">${Object.entries(REFLECTION_FIELDS).map(([field, label]) => `<label class="field"><span>${label}（选填）</span><textarea data-reflection="${field}" maxlength="200000" placeholder="${field === 'good' ? '再小的进步，也值得记下来。' : field === 'improve' ? '哪里可以换一种做法？' : '给下一次的自己一个具体建议。'}">${esc(state.reflections[day]?.[field] || '')}</textarea></label>`).join('')}</div>`;
+  } else {
+    body = `<div class="plan-items">${items.map((p, i) => `<section class="plan-item" data-plan="${p.id}">${kind === 'plans' ? `<div class="plan-item-top"><label class="field"><span>计划 ${i + 1}</span><textarea data-plan-field="text" maxlength="1000" aria-label="计划 ${i + 1}">${esc(p.text)}</textarea></label><button class="icon-button danger-button" data-action="delete-plan" data-id="${p.id}" aria-label="删除计划 ${i + 1}">${icon('close', 16)}</button></div>` : `<h3>${i + 1}. ${esc(p.text || '（待填写的计划）')}</h3><label class="field"><span>完成情况</span><select data-plan-field="status" aria-label="计划 ${i + 1} 完成情况">${Object.entries(PLAN_STATUSES).map(([value, label]) => `<option value="${value}" ${p.status === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label class="field"><span>原因或补充（选填）</span><textarea data-plan-field="reason" maxlength="10000" placeholder="记录进展、原因或收获">${esc(p.reason)}</textarea></label>`}</section>`).join('') || `<p class="daily-empty">${kind === 'plans' ? '还没有计划，先添加一件想做的事。' : '前一天没有为这天制定计划。可以回到前一天，在「明日计划」中补写。'}</p>`}</div>${kind === 'plans' ? '<form id="plan-form" class="form-grid"><label class="field"><span>添加一项计划</span><textarea name="text" maxlength="1000" required placeholder="例如：练习小号 30 分钟"></textarea></label><p class="form-error" id="form-error" role="alert"></p><button type="submit" class="primary-button">添加计划</button><p class="field-note">输入后点「添加计划」加入清单，已添加的事项修改后自动保存。</p></form>' : ''}`;
+  }
+  showModal(kind === 'plans' ? '明日计划' : kind === 'review' ? '昨日计划完成情况' : '今日反思', kind === 'plans' ? `${fullDate(day)} 制定 → ${fullDate(addDays(day, 1))} 执行` : kind === 'review' ? `${fullDate(planningDay)} 制定 → ${fullDate(day)} 执行` : fullDate(day), `${body}${dailySaveFooter()}<div class="form-actions"><button class="primary-button" data-action="close-modal">完成</button></div>`, { kind, day, planningDay, className: 'daily-modal', pendingChanges: new Map() });
+}
+
+function queueDailySave(el) {
+  const context = modalContext;
+  if (!['plans', 'review', 'reflection'].includes(context?.kind)) return;
+  // Keep failed patches until a successful retry; never replace a whole day's
+  // data with a stale modal snapshot from another open tab.
+  if (el?.matches('[data-plan-field], [data-reflection]')) {
+    const key = el.dataset.reflection || `${el.closest('[data-plan]').dataset.plan}:${el.dataset.planField}`;
+    context.pendingChanges.set(key, { id: el.closest('[data-plan]')?.dataset.plan, field: el.dataset.reflection || el.dataset.planField, value: el.value });
+  }
+  const changes = new Map(context.pendingChanges);
+  if (!changes.size) return;
+  const sequence = ++noteSequence;
+  $('#save-status').textContent = '正在保存…';
+  noteWrites = noteWrites.catch(() => {}).then(async () => {
+    try {
+      await mutate(current => {
+        for (const { id, field, value } of changes.values()) {
+          if (context.kind === 'reflection') saveReflection(current, context.day, field, value);
+          else updatePlan(current, context.planningDay, id, { [field]: value });
+        }
+        return current;
+      });
+      for (const [key, patch] of changes) if (context.pendingChanges.get(key) === patch) context.pendingChanges.delete(key);
+      if (sequence === noteSequence && modalContext === context) {
+        context.saveFailed = false; $('#save-status').textContent = '已保存在本机'; $('#retry-daily').hidden = true;
+      }
+    } catch {
+      if (sequence === noteSequence && modalContext === context) {
+        context.saveFailed = true; $('#save-status').textContent = '保存失败，请重试或复制文字'; $('#retry-daily').hidden = false;
+      }
+    }
+  });
 }
 
 function calendarPage() {
@@ -175,10 +247,10 @@ function settingsPage() {
       <section class="soft-card setting-card"><h2>默认类别</h2><p>默认类别每天显示。临时类别只在添加当天或已有记录的日期出现；取消默认不会删除过去。</p>
         <div class="category-setting-list">${state.categories.map(c => `<div class="category-setting-row"><span class="timeline-dot" style="--category:${c.color}"></span><span class="category-setting-name">${esc(c.name)}</span>${c.core ? '<span class="field-note">基础类别</span>' : `<button class="default-switch ${isOngoingDefault(c) ? 'is-on' : ''}" data-action="toggle-default" data-id="${c.id}">${isOngoingDefault(c) ? '✓ 已设为默认' : '设为默认'}</button>`}</div>`).join('')}</div>
       </section>
-      <section class="soft-card setting-card"><h2>备份你的时光</h2><p>计时、目标和文字全部存在当前浏览器。清除网站数据、卸载主屏幕应用或换手机可能导致丢失，请定期导出。</p><div class="setting-actions"><button class="primary-button" data-action="export">导出备份</button><button class="secondary-button" data-action="restore">恢复备份</button>${recoveryAvailable ? '<button class="secondary-button" data-action="export-recovery">下载恢复前备份</button>' : ''}</div><p id="backup-info">${state.sessions.length} 段计时 · ${Object.values(state.notes).reduce((n, notes) => n + Object.values(notes).filter(v => v.text).length, 0)} 篇记录</p></section>
+      <section class="soft-card setting-card"><h2>备份你的时光</h2><p>计时、目标、备忘录、计划和反思全部存在当前浏览器。清除网站数据、卸载主屏幕应用或换手机可能导致丢失，请定期导出。</p><div class="setting-actions"><button class="primary-button" data-action="export">导出备份</button><button class="secondary-button" data-action="restore">恢复备份</button>${recoveryAvailable ? '<button class="secondary-button" data-action="export-recovery">下载恢复前备份</button>' : ''}</div><p id="backup-info">${state.sessions.length} 段计时 · ${Object.values(state.notes).reduce((n, notes) => n + Object.values(notes).filter(v => v.text).length, 0)} 篇记录 · ${dailyBackupSummary(state)}</p></section>
       <section class="soft-card setting-card"><h2>添加到 iPhone 主屏幕</h2><p>在 Safari 打开本站，点击「分享」，选择「添加到主屏幕」。建议从主屏幕入口开始正式记录，避免切换入口后找不到原来的数据。</p><div class="setting-actions">${installPrompt ? '<button class="secondary-button" data-action="install">安装时光簿</button>' : ''}<button class="secondary-button" data-action="storage-persist">申请持久保存</button></div><p id="offline-status">${'serviceWorker' in navigator && window.isSecureContext ? '离线缓存准备中…' : '当前地址无法启用离线缓存，正式使用请部署到 HTTPS。'}</p></section>
     </div>
-    <div class="privacy-note"><strong>只属于你的本机空间</strong><br>无账号、无广告、无分析追踪，不上传计时或备忘录。网页托管服务只提供应用文件。备份文件包含明文记录，请保存在你信任的位置。<br><br>时光簿 v1.0 · 温柔地记录，认真地生活。</div>
+    <div class="privacy-note"><strong>只属于你的本机空间</strong><br>无账号、无广告、无分析追踪，不上传计时、备忘录、计划或反思。网页托管服务只提供应用文件。备份文件包含明文记录，请保存在你信任的位置。<br><br>时光簿 v1.1 · 温柔地记录，认真地生活。</div>
   </section>`;
 }
 
@@ -197,7 +269,7 @@ function showModal(title, subtitle, body, { kind, className = '', ...context } =
 }
 
 async function closeModal() {
-  if (modalContext?.kind === 'memo') {
+  if (['memo', 'plans', 'review', 'reflection'].includes(modalContext?.kind)) {
     await noteWrites;
     if (modalContext?.saveFailed) { toast('记录尚未保存成功，请先重试保存'); return; }
   }
@@ -291,7 +363,7 @@ async function exportBackup(recovery = false) {
   if (!value) { toast('没有恢复前备份'); return; }
   const name = `时光簿-${recovery ? '恢复前备份-' : '备份-'}${dateKey()}-${Date.now()}.json`;
   const downloadUrl = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }));
-  showModal('备份已准备好', '点击下方按钮，将 JSON 文件保存在你选择的位置。', `<p class="field-note">包含计时、目标、类别和文字记录。备份为明文，请妥善保存。<br>iPhone 若打开了文件预览，可通过「分享」选择「存储到文件」。</p><div class="form-actions"><button class="secondary-button" data-action="close-modal">完成</button><a class="primary-button backup-download" href="${esc(downloadUrl)}" download="${esc(name)}">保存备份文件</a></div>`, { kind: 'export', downloadUrl });
+  showModal('备份已准备好', '点击下方按钮，将 JSON 文件保存在你选择的位置。', `<p class="field-note">包含计时、目标、类别、备忘录、计划完成情况和反思。${dailyBackupSummary(value.data)}。备份为明文，请妥善保存。<br>iPhone 若打开了文件预览，可通过「分享」选择「存储到文件」。</p><div class="form-actions"><button class="secondary-button" data-action="close-modal">完成</button><a class="primary-button backup-download" href="${esc(downloadUrl)}" download="${esc(name)}">保存备份文件</a></div>`, { kind: 'export', downloadUrl });
 }
 
 async function previewRestore(file) {
@@ -301,7 +373,7 @@ async function previewRestore(file) {
   try { parsed = JSON.parse(await file.text()); } catch { throw new Error('无法读取备份，请选择有效的 JSON 文件'); }
   const restored = validateBackup(parsed);
   const noteCount = Object.values(restored.notes).reduce((n, entries) => n + Object.values(entries).filter(v => v.text).length, 0);
-  showModal('恢复并替换本机数据？', '请先确认备份内容，恢复将覆盖当前全部记录。', `<p class="field-note">文件：${esc(file.name)}<br>包含 ${restored.categories.length} 个类别、${restored.sessions.length} 段计时、${noteCount} 篇文字记录。${restored.active ? '<br>备份包含进行中的计时，恢复后将从原开始时间继续累计。' : ''}${state.active ? '<br>本机正在计时，恢复后该计时会被替换。' : ''}<br><br>系统会将当前数据自动保存为一份恢复前备份，可在设置页下载。</p><p class="form-error" id="form-error" role="alert"></p><div class="form-actions"><button class="secondary-button" data-action="close-modal">取消</button><button class="primary-button" data-action="confirm-restore">确认替换</button></div>`, { kind: 'restore', restored });
+  showModal('恢复并替换本机数据？', '请先确认备份内容，恢复将覆盖当前全部记录。', `<p class="field-note">文件：${esc(file.name)}<br>包含 ${restored.categories.length} 个类别、${restored.sessions.length} 段计时、${noteCount} 篇文字记录、${dailyBackupSummary(restored)}。${parsed.formatVersion === 1 ? '<br>这是旧版备份，不含新版计划和反思；恢复后这些内容将被清空。' : ''}${restored.active ? '<br>备份包含进行中的计时，恢复后将从原开始时间继续累计。' : ''}${state.active ? '<br>本机正在计时，恢复后该计时会被替换。' : ''}<br><br>系统会将当前数据自动保存为一份恢复前备份，可在设置页下载。</p><p class="form-error" id="form-error" role="alert"></p><div class="form-actions"><button class="secondary-button" data-action="close-modal">取消</button><button class="primary-button" data-action="confirm-restore">确认替换</button></div>`, { kind: 'restore', restored });
 }
 
 function shiftMonth(count) {
@@ -320,6 +392,21 @@ async function action(name, button) {
     case 'add-category': showCategoryForm(); break;
     case 'goal': showGoal(id, day); break;
     case 'memo': showMemo(id, day); break;
+    case 'daily-module': showDailyModule(button.dataset.kind, day); break;
+    case 'retry-daily': queueDailySave(); break;
+    case 'delete-plan': {
+      await noteWrites;
+      if (modalContext.saveFailed) throw new Error('请先重试保存');
+      const context = modalContext;
+      showModal('删除这项计划？', '该事项及次日对应的完成情况、说明会一并删除。', `<div class="form-actions"><button class="secondary-button" data-action="cancel-delete-plan">取消</button><button class="primary-button" data-action="confirm-delete-plan">确认删除</button></div>`, { kind: 'delete-plan', day: context.day, planningDay: context.planningDay, id });
+      break;
+    }
+    case 'cancel-delete-plan': showDailyModule('plans', modalContext.day); break;
+    case 'confirm-delete-plan': {
+      const context = modalContext;
+      await mutate(current => { deletePlan(current, context.planningDay, context.id); return current; });
+      showDailyModule('plans', context.day); toast('计划已删除'); break;
+    }
     case 'close-modal': await closeModal(); break;
     case 'retry-note': queueNoteSave(); break;
     case 'start': await mutate(current => { startTimer(current, id); return current; }); render(); toast('开始记录，锁屏也会继续累计'); break;
@@ -401,6 +488,13 @@ document.addEventListener('submit', async event => {
         return current;
       });
       await closeModal(); toast('当天目标已保存');
+    } else if (form.id === 'plan-form') {
+      await noteWrites;
+      if (modalContext.saveFailed) throw new Error('请先重试保存');
+      const context = modalContext;
+      await mutate(current => { addPlan(current, context.day, fd.get('text')); return current; });
+      showDailyModule('plans', context.day);
+      $('#plan-form textarea').focus();
     } else if (form.id === 'session-form') await submitSession(form);
   } catch (e) { if ($('#form-error')) $('#form-error').textContent = e.message; else toast(e.message); }
   finally { busy = false; }
@@ -408,7 +502,11 @@ document.addEventListener('submit', async event => {
 
 document.addEventListener('input', event => {
   if (event.target.id === 'memo-text') queueNoteSave();
+  if (event.target.matches('[data-plan-field], [data-reflection]')) queueDailySave(event.target);
   if (event.target.closest('#session-form')) { $('#conflict-container').innerHTML = ''; $('#form-error').textContent = ''; }
+});
+document.addEventListener('change', event => {
+  if (event.target.matches('select[data-plan-field]')) queueDailySave(event.target);
 });
 
 document.addEventListener('keydown', event => {

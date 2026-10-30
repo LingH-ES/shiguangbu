@@ -1,5 +1,7 @@
 // Pure time and backup rules shared by the UI and the verification suite.
-export const VERSION = 1;
+export const VERSION = 2;
+export const PLAN_STATUSES = { pending: '未完成', partial: '部分完成', done: '已完成' };
+export const REFLECTION_FIELDS = { good: '今天做得好的', improve: '需要改进的', next: '下一步怎么做' };
 export const CORE_IDS = ['sleep', 'study', 'leisure'];
 export const PALETTE = ['#829987', '#c88869', '#d7a672', '#8196ac', '#9d88a8', '#749d9d'];
 
@@ -37,6 +39,8 @@ export function initialState(today = dateKey()) {
     dayCategories: {},
     goals: {},
     notes: {},
+    plans: {},
+    reflections: {},
     sessions: [],
     active: null,
   };
@@ -44,6 +48,56 @@ export function initialState(today = dateKey()) {
 
 export function uid() {
   return crypto.randomUUID();
+}
+
+// Plans belong to the day on which they were made. The following day's review
+// reads those same items, so edits never create a second, divergent copy.
+export function migrateState(state) {
+  if (![1, VERSION].includes(state.version)) throw new Error('不支持的数据版本');
+  state.plans ??= {};
+  state.reflections ??= {};
+  state.version = VERSION;
+  return state;
+}
+
+export function plansForReview(state, day) {
+  return state.plans?.[addDays(day, -1)] || [];
+}
+
+export function addPlan(state, day, text) {
+  if (!validDay(day) || typeof text !== 'string' || !text.trim() || text.length > 1000) throw new Error('请填写1至1000字的计划');
+  const items = state.plans[day] || [];
+  if (items.length >= 200) throw new Error('每天最多200项计划');
+  const item = { id: uid(), text: text.trim(), status: 'pending', reason: '' };
+  state.plans[day] = [...items, item];
+  return item;
+}
+
+export function updatePlan(state, day, id, changes) {
+  const item = state.plans[day]?.find(p => p.id === id);
+  if (!item) throw new Error('这项计划已被删除，请重新打开');
+  if (Object.hasOwn(changes, 'text')) {
+    if (typeof changes.text !== 'string' || changes.text.length > 1000) throw new Error('计划最多1000字');
+    item.text = changes.text;
+  }
+  if (Object.hasOwn(changes, 'status')) {
+    if (!Object.hasOwn(PLAN_STATUSES, changes.status)) throw new Error('完成状态不正确');
+    item.status = changes.status;
+  }
+  if (Object.hasOwn(changes, 'reason')) {
+    if (typeof changes.reason !== 'string' || changes.reason.length > 10000) throw new Error('完成说明最多10000字');
+    item.reason = changes.reason;
+  }
+}
+
+export function deletePlan(state, day, id) {
+  state.plans[day] = (state.plans[day] || []).filter(p => p.id !== id);
+}
+
+export function saveReflection(state, day, field, text) {
+  if (!validDay(day) || !Object.hasOwn(REFLECTION_FIELDS, field) || typeof text !== 'string' || text.length > 200000) throw new Error('反思内容不正确或过长');
+  state.reflections[day] ||= { good: '', improve: '', next: '' };
+  state.reflections[day][field] = text;
 }
 
 export function isDefault(category, day) {
@@ -178,9 +232,9 @@ function safeMap(value, label) {
 }
 
 export function validateBackup(input) {
-  assert(record(input) && input.app === 'time-balance' && input.formatVersion === VERSION, '不是时光簿支持的备份文件');
+  assert(record(input) && input.app === 'time-balance' && [1, VERSION].includes(input.formatVersion), '不是时光簿支持的备份文件');
   const d = input.data;
-  assert(record(d) && d.version === VERSION && validDay(d.createdOn), '数据版本或创建日期不正确');
+  assert(record(d) && d.version === input.formatVersion && validDay(d.createdOn), '数据版本或创建日期不正确');
   assert(Array.isArray(d.categories) && d.categories.length >= 3 && d.categories.length <= 300, '类别数量不正确');
   const ids = new Set();
   const categories = d.categories.map(c => {
@@ -235,5 +289,26 @@ export function validateBackup(input) {
     assert(!sessions.some(s => s.end > a.start), '正在计时与其他记录重叠');
     active = { id: a.id, categoryId: a.categoryId, start: a.start };
   }
-  return { version: VERSION, createdOn: d.createdOn, categories, notes, goals, dayCategories, sessions, active };
+  const plans = {}, reflections = {};
+  // A v2 backup must contain both fields. Only original v1 backups may omit them.
+  for (const field of ['plans', 'reflections']) safeMap(d[field] === undefined && d.version === 1 ? {} : d[field], field);
+  for (const [day, items] of Object.entries(d.plans || {})) {
+    assert(validDay(day) && Array.isArray(items) && items.length <= 200, '计划日期或数量不正确');
+    const itemIds = new Set();
+    plans[day] = items.map(p => {
+      assert(record(p) && typeof p.id === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(p.id) && !itemIds.has(p.id), '计划标识不正确或重复');
+      itemIds.add(p.id);
+      assert(typeof p.text === 'string' && p.text.length <= 1000 && Object.hasOwn(PLAN_STATUSES, p.status) && typeof p.reason === 'string' && p.reason.length <= 10000, '计划内容或完成情况不正确');
+      return { id: p.id, text: p.text, status: p.status, reason: p.reason };
+    });
+  }
+  for (const [day, entry] of Object.entries(d.reflections || {})) {
+    assert(validDay(day), '反思日期不正确'); safeMap(entry, '反思');
+    reflections[day] = {};
+    for (const field of Object.keys(REFLECTION_FIELDS)) {
+      assert(typeof entry[field] === 'string' && entry[field].length <= 200000, '反思内容不正确');
+      reflections[day][field] = entry[field];
+    }
+  }
+  return { version: VERSION, createdOn: d.createdOn, categories, notes, goals, dayCategories, sessions, active, plans, reflections };
 }

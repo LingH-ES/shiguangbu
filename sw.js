@@ -1,4 +1,4 @@
-const CACHE = 'time-balance-shell-c3c93f6cac2d58d5';
+const CACHE = 'time-balance-shell-00969037aaeceaa2';
 const FILES = ['./', './index.html', './styles.css', './app.js', './model.js', './storage.js', './manifest.webmanifest', './icon.svg', './apple-touch-icon.png', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(FILES)));

@@ -1,4 +1,4 @@
-import { initialState, makeBackup } from './model.js';
+import { initialState, makeBackup, migrateState } from './model.js';
 
 const DATABASE = 'time-balance-private';
 const STORE = 'state';
@@ -26,7 +26,7 @@ export function updateState(mutator, { recovery = false } = {}) {
     let failure;
     read.onsuccess = () => {
       try {
-        const current = read.result || initialState();
+        const current = migrateState(read.result || initialState());
         if (recovery) store.put(makeBackup(current), 'beforeRestore');
         next = mutator(structuredClone(current)) || current;
         store.put(next, 'current');

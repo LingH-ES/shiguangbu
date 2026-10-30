@@ -244,4 +244,25 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .timeline-label span { font-size: 11px; }
   .toast { max-width: calc(100vw - 28px); white-space: normal; border-radius: 14px; font-size: 12px; }
 }
+.daily-modules { display: grid; gap: 12px; }
+.daily-card { min-width: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); overflow: hidden; }
+.daily-card-open { width: 100%; display: grid; gap: 9px; padding: 19px; border: 0; background: transparent; text-align: left; cursor: pointer; }
+.daily-card-open:hover { background: #f0f2eb; }
+.daily-card-heading, .daily-card-heading > span { display: flex; align-items: center; gap: 10px; }
+.daily-card-heading { justify-content: space-between; color: var(--forest); }
+.daily-card-heading strong { font-size: 15px; font-weight: 600; }
+.daily-card-subtitle { color: #7a847b; font-size: 12px; line-height: 1.6; }
+.daily-card-summary { font-size: 13px; line-height: 1.6; }
+.daily-card-preview { color: #7a847b; font-size: 12px; line-height: 1.7; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; }
+.plan-items { display: grid; gap: 15px; margin-bottom: 22px; }
+.plan-item { min-width: 0; display: grid; gap: 13px; padding: 15px; background: #f5f5ef; border-radius: 13px; }
+.plan-item-top { display: flex; gap: 8px; align-items: start; }
+.plan-item-top .field { flex: 1; min-width: 0; }
+.plan-item h3 { margin: 0; font-size: 16px; line-height: 1.7; font-weight: 500; white-space: pre-wrap; overflow-wrap: anywhere; }
+.daily-modal .field textarea { min-height: 90px; }
+.daily-modal .field > span, .daily-modal .field-note, .daily-empty, .daily-save { font-size: 12px; line-height: 1.7; }
+.daily-modal .icon-button { min-width: 44px; min-height: 44px; }
+.daily-save { margin-top: 20px; }
+.daily-empty { color: #7a847b; }
+.daily-card-open:focus-visible { outline-offset: -4px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
