@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f5f4ef" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="时光簿" />
+    <meta name="description" content="只属于自己的时间记录与每日备忘录。" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+    <title>时光簿 · 每日时间记录</title>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#today" aria-label="时光簿首页">
+          <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+          <span>时光簿</span>
+        </a>
+        <div class="topbar-right">
+          <span class="local-badge"><span class="local-dot"></span>仅本机保存</span>
+          <button class="avatar-button" data-action="open-settings" aria-label="打开设置">L</button>
+        </div>
+      </header>
+
+      <main id="app" tabindex="-1" aria-live="polite"></main>
+
+      <nav class="bottom-nav" aria-label="主导航">
+        <button class="nav-item is-active" data-tab="today" aria-label="今日">
+          <span class="nav-icon" data-icon="today"></span><span>今日</span>
+        </button>
+        <button class="nav-item" data-tab="calendar" aria-label="日历">
+          <span class="nav-icon" data-icon="calendar"></span><span>日历</span>
+        </button>
+        <button class="nav-item" data-tab="settings" aria-label="设置">
+          <span class="nav-icon" data-icon="settings"></span><span>设置</span>
+        </button>
+      </nav>
+    </div>
+    <div id="modal-root"></div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <input id="restore-input" type="file" accept="application/json,.json" hidden />
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>
